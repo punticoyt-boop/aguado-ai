@@ -263,6 +263,13 @@
   const ERRORES = {
     OLLAMA_APAGADO: "La IA no está prendida. Abre **Ollama** en tu PC (o instálalo desde ollama.com) y vuelve a intentar. Mira la pestaña *Cómo instalar*.",
     MODELO_NO_INSTALADO: "Ese modelo no está descargado. En la terminal escribe: `ollama pull qwen2.5-coder:7b`",
+    SIN_CLAVE: "Para usar Claude falta la clave. Ponla en el archivo `.env` como `ANTHROPIC_API_KEY=...` y reinicia `iniciar.bat`.",
+    CLAVE_MALA: "La clave de Claude no es válida. Revisa `ANTHROPIC_API_KEY` en el archivo `.env`.",
+    SIN_SALDO: "Tu cuenta de Claude no tiene saldo. Agrega crédito en platform.claude.com (Billing).",
+    LIMITE: "Claude recibió demasiados mensajes seguidos. Espera un momento y vuelve a intentar.",
+    OCUPADO: "Claude está muy ocupado ahora mismo. Intenta en un momento.",
+    CLAUDE_ERROR: "Claude devolvió un error. Intenta de nuevo; si sigue, mira la consola donde corre `iniciar.bat`.",
+    SIN_INTERNET: "No me pude conectar con Claude. Revisa tu internet.",
     SIN_CONEXION: "No me pude conectar con **Ollama** en tu PC. Revisa que esté abierto y que hayas permitido esta página (los pasos están en la pantalla de inicio: dale a *Nuevo chat*). Si el navegador te pregunta si la página puede acceder a tu red local, dale **Permitir**.",
     MUY_GRANDE: "Los archivos que adjuntaste son muy grandes. Prueba con menos o más pequeños.",
   };
@@ -274,6 +281,12 @@
     escribir_archivo: { t: "Crear / cambiar archivo", k: "ruta", i: '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>' },
     ejecutar_comando: { t: "Correr comando", k: "comando", i: '<path d="m4 17 6-5-6-5M12 19h8"/>' },
     abrir: { t: "Abrir", k: "que", i: '<path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>' },
+    ver_pantalla: { t: "Ver la pantalla", k: () => "", i: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>' },
+    clic: { t: "Clic", k: (a) => `${a.doble ? "doble " : ""}${a.boton === "derecho" ? "derecho " : ""}en ${a.x}, ${a.y}`, i: '<path d="m5 3 14 7-6 2-2 6Z"/>' },
+    escribir: { t: "Escribir", k: "texto", i: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>' },
+    tecla: { t: "Tecla", k: "combo", i: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h6v6H9z"/>' },
+    desplazar: { t: "Scroll", k: "direccion", i: '<rect x="7" y="3" width="10" height="18" rx="5"/><path d="M12 7v4"/>' },
+    esperar: { t: "Esperar", k: (a) => `${a.segundos} s`, i: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>' },
   };
   const segura = (n) => (estado.seguras || ["listar_carpeta", "leer_archivo"]).includes(n);
   function toolCardHTML(tc, st) {
@@ -281,9 +294,9 @@
     const d = TOOLS[f.name] || { t: f.name, k: "", i: "" };
     const a = f.arguments || {};
     const extra = f.name === "escribir_archivo" ? a.contenido : f.name === "ejecutar_comando" ? "" : "";
-    return `<div class="tool ${st || ""}"><div class="tool-head"><svg viewBox="0 0 24 24">${d.i}</svg><b>${esc(d.t)}</b><code>${esc(String(a[d.k] ?? ""))}</code><span class="tool-st"></span></div>${
+    return `<div class="tool ${st || ""}"><div class="tool-head"><svg viewBox="0 0 24 24">${d.i}</svg><b>${esc(d.t)}</b><code>${esc(String((typeof d.k === "function" ? d.k(a) : a[d.k]) ?? ""))}</code><span class="tool-st"></span></div>${
       extra ? `<details><summary>Ver contenido</summary><pre>${esc(String(extra).slice(0, 20000))}</pre></details>` : ""
-    }<div class="tool-out" hidden></div><div class="tool-actions" hidden><button type="button" class="btn sm" data-ok>Permitir</button><button type="button" class="btn sm ghost" data-no>Cancelar</button></div></div>`;
+    }<div class="tool-out" hidden></div><div class="tool-actions" hidden><button type="button" class="btn sm" data-ok>Permitir</button><button type="button" class="btn sm ghost" data-all>Permitir todo en este chat</button><button type="button" class="btn sm ghost" data-no>Cancelar</button></div></div>`;
   }
   let pendientes = [];
   function cancelarPermisos() { pendientes.forEach((fn) => fn(false)); pendientes = []; }
@@ -298,17 +311,18 @@
       pendientes.push(done);
       acts.querySelector("[data-ok]").onclick = () => done(true);
       acts.querySelector("[data-no]").onclick = () => done(false);
+      acts.querySelector("[data-all]").onclick = () => { if (current) current.autoOk = true; save(); done(true); };
     });
   }
   async function correrHerramienta(tc, card) {
     const f = tc.function || {};
     const st = card.querySelector(".tool-st");
     const out = card.querySelector(".tool-out");
-    if (!TOOLS[f.name]) return "Error: esa herramienta no existe.";
-    if (!segura(f.name) && !(await pedirPermiso(card))) {
+    if (!TOOLS[f.name]) return { texto: "Error: esa herramienta no existe." };
+    if (!segura(f.name) && !(current && current.autoOk) && !(await pedirPermiso(card))) {
       card.classList.add("no");
       st.textContent = "Cancelado";
-      return "El usuario NO dio permiso. No se hizo nada.";
+      return { texto: "El usuario NO dio permiso. No se hizo nada." };
     }
     st.textContent = "Trabajando…";
     card.classList.add("run");
@@ -320,8 +334,10 @@
     card.classList.add(r.ok ? "ok" : "bad");
     st.textContent = r.ok ? "Hecho" : "Falló";
     out.hidden = false;
-    out.innerHTML = `<details><summary>Resultado</summary><pre>${esc(r.resultado)}</pre></details>`;
-    return r.resultado;
+    out.innerHTML = r.imagen
+      ? `<details><summary>Ver captura</summary><img class="shot" src="data:image/jpeg;base64,${r.imagen}" alt=""></details>`
+      : `<details><summary>Resultado</summary><pre>${esc(r.resultado)}</pre></details>`;
+    return { texto: String(r.resultado ?? ""), imagen: r.imagen };
   }
   // Este modelo escribe la herramienta como texto JSON en vez de usarla: la buscamos en el texto
   function toolDeTexto(text) {
@@ -363,7 +379,7 @@
             method: "POST",
             headers: { "Content-Type": "application/json", "X-AguadoAI": "1" },
             signal: ctrl.signal,
-            body: JSON.stringify({ model: el.model.value, messages: current.messages.map(({ role, content, images, tool_calls, tool_name }) => ({ role, content, images, tool_calls, tool_name })) }),
+            body: JSON.stringify({ model: el.model.value, messages: current.messages.map(({ role, content, images, tool_calls, tool_name, tool_call_id }) => ({ role, content, images, tool_calls, tool_name, tool_call_id })) }),
           })
         : await fetch(OLLAMA + "/api/chat", {
             method: "POST",
@@ -409,7 +425,7 @@
       if (!raf) raf = requestAnimationFrame(() => { raf = 0; pintar(); });
     }
     if (raf) cancelAnimationFrame(raf);
-    if (!calls.length && !DIRECTO) {
+    if (!calls.length && !DIRECTO && !/^claude-/.test(el.model.value)) {
       const t = toolDeTexto(answer);
       if (t) { calls = t.calls; answer = t.antes; }
     }
@@ -446,7 +462,7 @@
     let respondio = false;
     let bubble = addMsg({ role: "assistant", content: "" });
     try {
-      for (let paso = 0; paso < 10; paso++) {
+      for (let paso = 0; paso < 40; paso++) {
         const t = await turnoIA(bubble);
         if (!t.tool_calls.length) {
           bubble.innerHTML = render(t.content || "(sin respuesta)");
@@ -462,7 +478,9 @@
         const cards = bubble.querySelectorAll(".tool");
         for (let i = 0; i < t.tool_calls.length; i++) {
           const res = await correrHerramienta(t.tool_calls[i], cards[i]);
-          current.messages.push({ role: "tool", tool_name: t.tool_calls[i].function.name, content: String(res) });
+          // solo guardamos la ultima captura de pantalla (las imagenes ocupan mucho)
+          if (res.imagen) current.messages.forEach((m) => { if (m.role === "tool") delete m.images; });
+          current.messages.push({ role: "tool", tool_name: t.tool_calls[i].function.name, tool_call_id: t.tool_calls[i].id, content: res.texto, ...(res.imagen ? { images: [res.imagen] } : {}) });
           save();
         }
         if (ctrl.signal.aborted) throw Object.assign(new Error("detenido"), { name: "AbortError" });
