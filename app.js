@@ -46,77 +46,91 @@
 
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
-  // ---------------- navegacion ----------------
+  // ---------------- navegacion (solo hay chat) ----------------
   function route() {
-    const view = location.hash === "#instalar" || location.pathname.replace(/\/+$/, "") === "/instalar" ? "instalar" : "chat";
-    document.querySelectorAll(".view").forEach((v) => (v.hidden = v.id !== "view-" + view));
-    document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("on", a.dataset.view === view));
-    if (view === "chat") el.input.focus();
+    document.querySelectorAll(".view").forEach((v) => (v.hidden = v.id !== "view-chat"));
+    document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("on", a.dataset.view === "chat"));
+    el.input.focus();
   }
-  window.addEventListener("hashchange", route);
+
+  // ---------------- creditos (saldo) ----------------
+  function mostrarSaldo(s) {
+    const box = $("#saldo");
+    if (!box || !s) return;
+    box.hidden = false;
+    $("#saldoTxt").textContent = "$" + Number(s.queda).toFixed(2) + " de $" + Number(s.inicial).toFixed(2);
+    const pct = s.inicial > 0 ? Math.max(0, Math.min(100, (s.queda / s.inicial) * 100)) : 0;
+    $("#saldoBar").style.width = pct + "%";
+    box.classList.toggle("bajo", pct < 20);
+  }
 
   // ---------------- estado de la IA ----------------
   let estado = { ok: false, modelos: [] };
   async function checkEstado() {
     try {
-      await buscarServidor();
-      if (ENWEB) el.hint.textContent = DIRECTO ? "Versión web: la IA corre en tu PC con Ollama. Para que pueda usar tu PC, abre iniciar.bat." : "Conectada a tu PC (iniciar.bat): puede usar tu PC, siempre con tu permiso.";
-      if (!DIRECTO) estado = await (await fetch(API + "/api/estado")).json();
-      else {
-        const j = await (await fetch(OLLAMA + "/api/tags", { signal: AbortSignal.timeout(4000) })).json();
-        const modelos = (j.models || []).map((m) => m.name);
-        estado = { ok: true, modelos, modelo: modelos.find((m) => /coder/.test(m)) || modelos[0] || "qwen2.5-coder:7b" };
-      }
+      estado = await (await fetch("/api/estado")).json();
     } catch {
       estado = { ok: false, modelos: [] };
     }
     const s = el.status;
     s.classList.toggle("ok", estado.ok && estado.modelos.length > 0);
     s.classList.toggle("bad", !estado.ok || !estado.modelos.length);
-    s.querySelector("span").textContent = !estado.ok ? "Ollama apagado" : !estado.modelos.length ? "Falta el modelo" : "IA conectada";
+    s.querySelector("span").textContent = !estado.ok ? "IA apagada" : estado.motor === "claude" ? "Claude conectado" : "IA conectada";
     const prev = el.model.value || localStorage.getItem("aguadoai_model") || estado.modelo;
-    const list = estado.modelos.length ? estado.modelos : [estado.modelo || "qwen2.5-coder:7b"];
+    const list = estado.modelos.length ? estado.modelos : [estado.modelo || "claude-sonnet-5-5"];
     el.model.innerHTML = list.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
     el.model.value = list.includes(prev) ? prev : list[0];
-    if (typeof showSetup === "function") showSetup();
+    if (estado.saldo) mostrarSaldo(estado.saldo);
   }
-  // ---------------- instalar el cerebro con un boton ----------------
-  const setup = $("#setup"), installBtn = $("#installBtn"), installLog = $("#installLog");
-  let instalandoUI = false;
-  function showSetup() { if (!instalandoUI) setup.hidden = estado.ok && estado.modelos.length > 0; }
-  if (ENWEB) {
-    setup.innerHTML = `<b>Conecta la IA de tu PC</b><p>Esta página usa la IA gratis que corre en tu computadora (Ollama). Solo se hace una vez:</p>
-      <ol><li>Instala Ollama desde <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a> y descarga el cerebro: <code>ollama pull qwen2.5-coder:7b</code></li>
-      <li>Permite esta página. En PowerShell escribe:<pre>setx OLLAMA_ORIGINS "${location.origin}"</pre></li>
-      <li>Cierra Ollama (clic derecho en la llamita de la barra de Windows → Quit) y vuelve a abrirlo.</li>
-      <li>Recarga esta página. Si el navegador pregunta si puede acceder a tu red local o a otros dispositivos, dale <b>Permitir</b>.</li></ol>`;
+
+  // ---------------- inicio de sesion con Roblox ----------------
+  const loginBox = $("#login");
+  function pedirLogin(msg) {
+    loginBox.hidden = false;
+    if (msg) $("#loginErr").textContent = msg;
   }
-  installBtn.addEventListener("click", async () => {
-    if (instalandoUI) return;
-    instalandoUI = true;
-    installBtn.disabled = true;
-    installBtn.textContent = "INSTALANDO…";
-    installLog.hidden = false;
-    installLog.textContent = "";
-    try {
-      const r = await fetch(API + "/api/instalar", { method: "POST", headers: { "X-AguadoAI": "1" } });
-      if (!r.ok || !r.body) throw new Error(r.status === 409 ? "Ya se está instalando." : "No se pudo empezar la instalación.");
-      const reader = r.body.getReader();
-      const dec = new TextDecoder();
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        installLog.textContent += dec.decode(value, { stream: true });
-        installLog.scrollTop = installLog.scrollHeight;
-      }
-    } catch (err) {
-      installLog.textContent += "\n" + err.message;
+  const ERR_LOGIN = {
+    cancelado: "Cancelaste el inicio de sesión.",
+    sesion: "La sesión expiró. Intenta de nuevo.",
+    roblox: "Roblox no respondió. Intenta de nuevo.",
+    no_permitido: "Esa cuenta de Roblox no tiene permiso para usar AGUADO AI.",
+  };
+  async function cargarUsuario() {
+    let r;
+    try { r = await fetch("/api/me"); } catch { return pedirLogin("No se pudo conectar con el servidor."); }
+    if (r.status === 401) {
+      const e = new URLSearchParams(location.search).get("error");
+      return pedirLogin(e ? ERR_LOGIN[e] || "No se pudo iniciar sesión." : "");
     }
-    instalandoUI = false;
-    installBtn.disabled = false;
-    installBtn.textContent = "INSTALAR CEREBRO GRATIS";
-    await checkEstado();
+    const j = await r.json();
+    if (location.search) history.replaceState(null, "", location.pathname);
+    loginBox.hidden = true;
+    const me = $("#me");
+    me.hidden = false;
+    $("#meName").textContent = j.user.displayName || j.user.username;
+    $("#meUser").textContent = "@" + j.user.username;
+    if (j.user.avatar) $("#meAvatar").src = j.user.avatar;
+  }
+  $("#logout").addEventListener("click", async () => {
+    try { await fetch("/auth/logout", { method: "POST", headers: { "X-AguadoAI": "1" } }); } catch {}
+    location.reload();
   });
+
+  // La pagina de GitHub solo te lleva a tu AGUADO AI (la que corre en tu PC)
+  if (ENWEB) {
+    pedirLogin();
+    $("#loginTitle").textContent = "Buscando AGUADO AI en tu PC…";
+    $("#loginBtn").hidden = true;
+    (async () => {
+      for (;;) {
+        await buscarServidor();
+        if (!DIRECTO) return location.replace("http://localhost:3000/");
+        $("#loginTitle").textContent = "AGUADO AI está apagada";
+        $("#loginText").textContent = "Prende AGUADO AI en tu PC (iniciar.bat) y esta página se abre sola.";
+        await new Promise((r) => setTimeout(r, 4000));
+      }
+    })();
+  }
 
   el.model.addEventListener("change", () => { try { localStorage.setItem("aguadoai_model", el.model.value); } catch {} });
 
@@ -263,6 +277,7 @@
   const ERRORES = {
     OLLAMA_APAGADO: "La IA no está prendida. Abre **Ollama** en tu PC (o instálalo desde ollama.com) y vuelve a intentar. Mira la pestaña *Cómo instalar*.",
     MODELO_NO_INSTALADO: "Ese modelo no está descargado. En la terminal escribe: `ollama pull qwen2.5-coder:7b`",
+    NO_SESSION: "Tu sesión se cerró. Vuelve a iniciar sesión con Roblox.",
     SIN_CLAVE: "Para usar Claude falta la clave. Ponla en el archivo `.env` como `ANTHROPIC_API_KEY=...` y reinicia `iniciar.bat`.",
     CLAVE_MALA: "La clave de Claude no es válida. Revisa `ANTHROPIC_API_KEY` en el archivo `.env`.",
     SIN_SALDO: "Tu cuenta de Claude no tiene saldo. Agrega crédito en platform.claude.com (Billing).",
@@ -330,6 +345,7 @@
     try {
       r = await (await fetch(API + "/api/herramienta", { method: "POST", headers: { "Content-Type": "application/json", "X-AguadoAI": "1" }, body: JSON.stringify({ name: f.name, arguments: f.arguments || {} }) })).json();
     } catch { r = { ok: false, resultado: "Error: no se pudo hablar con el servidor." }; }
+    if (r.error === "NO_SESSION") { pedirLogin("Tu sesión se cerró. Inicia sesión otra vez."); r.resultado = "Error: sesion cerrada."; }
     card.classList.remove("run");
     card.classList.add(r.ok ? "ok" : "bad");
     st.textContent = r.ok ? "Hecho" : "Falló";
@@ -421,6 +437,7 @@
         if (j.error) throw new Error(/not found/i.test(j.error) ? "MODELO_NO_INSTALADO" : "ERROR");
         if (j.message && j.message.content) answer += j.message.content;
         if (j.message && Array.isArray(j.message.tool_calls)) calls.push(...j.message.tool_calls);
+        if (j.saldo) mostrarSaldo(j.saldo);
       }
       if (!raf) raf = requestAnimationFrame(() => { raf = 0; pintar(); });
     }
@@ -495,6 +512,7 @@
         }
       } else {
         bubble.classList.add("err");
+        if (err.message === "NO_SESSION") pedirLogin("Tu sesión se cerró. Inicia sesión otra vez.");
         bubble.innerHTML = render(ERRORES[err.message] || "Algo salió mal al hablar con la IA. Revisa que Ollama esté abierto y vuelve a intentar.");
         checkEstado();
       }
@@ -520,6 +538,7 @@
   $("#side").addEventListener("click", (e) => { if (e.target.closest(".chat-item span, .new, .nav a")) closeMenu(); });
 
   // ---------------- arranque ----------------
+  if (!ENWEB) cargarUsuario();
   route();
   renderList();
   if (chats[0]) showChat(chats[0]);

@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=ai7" />
+  <link rel="stylesheet" href="style.css?v=ai8" />
 </head>
 <body>
   <div class="app" id="shell">
@@ -35,16 +35,21 @@
           <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg>
           Chat
         </a>
-        <a href="#instalar" data-view="instalar">
-          <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
-          Cómo instalar
-        </a>
       </nav>
 
       <div class="side-label">Recientes</div>
       <div class="chats" id="chats"></div>
 
       <div class="side-foot">
+        <div class="saldo" id="saldo" hidden title="Calculado según lo que gastas en Claude. El saldo exacto está en platform.claude.com">
+          <div class="saldo-top"><span>Créditos</span><b id="saldoTxt"></b></div>
+          <div class="saldo-bar"><i id="saldoBar"></i></div>
+        </div>
+        <div class="me" id="me" hidden>
+          <img id="meAvatar" alt="" src="logo-aguado.png" />
+          <div><b id="meName"></b><small id="meUser"></small></div>
+          <button class="icon-btn" id="logout" type="button" title="Cerrar sesión"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></button>
+        </div>
         <span class="status" id="status"><i></i><span>Conectando…</span></span>
         <label class="model-wrap" title="Modelo de IA">
           <svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"/></svg>
@@ -71,13 +76,6 @@
             <img class="hero-logo" src="logo-aguado.png" alt="" />
             <h1>¿Qué vamos a crear hoy?</h1>
             <p class="lead">Sistemas de Roblox, arreglar errores, ideas para tu juego o mejorar tus scripts.</p>
-
-            <div class="notice setup" id="setup" hidden>
-              <b>Falta el cerebro de la IA</b>
-              <p>Dale al botón y se instala solo (Ollama + el modelo, unos 5 GB, solo la primera vez). No cierres la página mientras se instala.</p>
-              <button class="btn" id="installBtn" type="button">Instalar cerebro gratis</button>
-              <pre class="log" id="installLog" hidden></pre>
-            </div>
 
             <div class="sugs">
               <button class="sug" type="button" data-q="Hazme un sistema de tienda con monedas para Roblox que guarde los datos con DataStore.">
@@ -117,27 +115,23 @@
           <p class="fine" id="hint">Aguado AI puede equivocarse. Prueba el código en Studio antes de publicar.</p>
         </form>
       </section>
-
-      <!-- INSTALAR -->
-      <section class="view page" id="view-instalar" hidden>
-        <div class="sec-head">
-          <h2>Cómo instalar tu IA</h2>
-          <p>Solo se hace una vez. La IA corre en tu computadora: es gratis y no tiene límite.</p>
-        </div>
-        <div class="steps">
-          <article class="card step"><b>1</b><div><h3>Instala Ollama</h3><p>Descárgalo de <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a>, instálalo y déjalo abierto (aparece una llamita en la barra de Windows).</p></div></article>
-          <article class="card step"><b>2</b><div><h3>Descarga el cerebro</h3><p>En la terminal de VS Code escribe (pesa unos 4.7 GB, solo la primera vez):</p><pre><code>ollama pull qwen2.5-coder:7b</code></pre><p>Para que también vea imágenes, descarga además:</p><pre><code>ollama pull qwen2.5vl:7b</code></pre></div></article>
-          <article class="card step"><b>3</b><div><h3>Prende la página</h3><p>En la terminal escribe:</p><pre><code>node server.js</code></pre><p>(o doble clic en <code>iniciar.bat</code>) y abre <a href="http://localhost:3000">localhost:3000</a>. Para apagarla: clic en la terminal y <code>Ctrl + C</code>.</p></div></article>
-          <article class="card step"><b>4</b><div><h3>Cambia su personalidad</h3><p>Edita el archivo <code>personalidad.txt</code> para decirle cómo quieres que responda. Se aplica en el siguiente mensaje, sin reiniciar.</p></div></article>
-        </div>
-        <div class="notice">
-          <b>¿Qué modelo usar?</b>
-          <p><code>qwen2.5-coder:7b</code> es el mejor para programar si tu tarjeta gráfica tiene 8 GB o más. Si tu PC va lenta, usa <code>qwen2.5-coder:3b</code>. Con una tarjeta de 16 GB o más, prueba <code>qwen2.5-coder:14b</code>, que es más inteligente.</p>
-        </div>
-      </section>
     </main>
   </div>
 
-  <script src="app.js?v=ai7"></script>
+  <!-- INICIAR SESION -->
+  <div class="login" id="login" hidden>
+    <div class="login-card">
+      <img src="logo-aguado.png" alt="" />
+      <h1 id="loginTitle">Bienvenido a Aguado <b>AI</b></h1>
+      <p id="loginText">Inicia sesión con tu cuenta de Roblox para usar la IA.</p>
+      <a class="btn roblox" id="loginBtn" href="/auth/login">
+        <svg viewBox="0 0 24 24"><path d="M6.2 2 2 17.8 17.8 22 22 6.2Z"/><path d="m10.5 9 4.5 1.2-1.2 4.5-4.5-1.2Z"/></svg>
+        Iniciar sesión con Roblox
+      </a>
+      <p class="login-err" id="loginErr"></p>
+    </div>
+  </div>
+
+  <script src="app.js?v=ai8"></script>
 </body>
 </html>
