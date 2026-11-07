@@ -23,10 +23,26 @@
     }
   }
   // Version web (GitHub Pages): habla directo con el Ollama de esta PC, sin control de PC
-  const DIRECTO = !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  const ENWEB = !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  // En la web: si tu servidor local (iniciar.bat) esta prendido, lo usamos (con control de PC). Si no, directo a Ollama.
+  let DIRECTO = ENWEB;
+  let API = "";
+  async function buscarServidor() {
+    if (!ENWEB) return;
+    try {
+      const r = await fetch("http://localhost:3000/api/estado", { signal: AbortSignal.timeout(1500) });
+      if (!r.ok) throw 0;
+      await r.json();
+      DIRECTO = false;
+      API = "http://localhost:3000";
+    } catch {
+      DIRECTO = true;
+      API = "";
+    }
+  }
   const OLLAMA = "http://localhost:11434";
   let PERSONALIDAD = "Eres AGUADO AI, la inteligencia artificial de AGUADO STUDIO. Ayudas a crear juegos de Roblox. Responde siempre en espanol y da el codigo Luau completo.";
-  if (DIRECTO) fetch("personalidad.txt").then((r) => (r.ok ? r.text() : "")).then((t) => { if (t) PERSONALIDAD = t; }).catch(() => {});
+  if (ENWEB) fetch("personalidad.txt").then((r) => (r.ok ? r.text() : "")).then((t) => { if (t) PERSONALIDAD = t; }).catch(() => {});
 
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
@@ -43,7 +59,9 @@
   let estado = { ok: false, modelos: [] };
   async function checkEstado() {
     try {
-      if (!DIRECTO) estado = await (await fetch("/api/estado")).json();
+      await buscarServidor();
+      if (ENWEB) el.hint.textContent = DIRECTO ? "Versión web: la IA corre en tu PC con Ollama. Para que pueda usar tu PC, abre iniciar.bat." : "Conectada a tu PC (iniciar.bat): puede usar tu PC, siempre con tu permiso.";
+      if (!DIRECTO) estado = await (await fetch(API + "/api/estado")).json();
       else {
         const j = await (await fetch(OLLAMA + "/api/tags", { signal: AbortSignal.timeout(4000) })).json();
         const modelos = (j.models || []).map((m) => m.name);
@@ -66,13 +84,12 @@
   const setup = $("#setup"), installBtn = $("#installBtn"), installLog = $("#installLog");
   let instalandoUI = false;
   function showSetup() { if (!instalandoUI) setup.hidden = estado.ok && estado.modelos.length > 0; }
-  if (DIRECTO) {
+  if (ENWEB) {
     setup.innerHTML = `<b>Conecta la IA de tu PC</b><p>Esta página usa la IA gratis que corre en tu computadora (Ollama). Solo se hace una vez:</p>
       <ol><li>Instala Ollama desde <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a> y descarga el cerebro: <code>ollama pull qwen2.5-coder:7b</code></li>
       <li>Permite esta página. En PowerShell escribe:<pre>setx OLLAMA_ORIGINS "${location.origin}"</pre></li>
       <li>Cierra Ollama (clic derecho en la llamita de la barra de Windows → Quit) y vuelve a abrirlo.</li>
       <li>Recarga esta página. Si el navegador pregunta si puede acceder a tu red local o a otros dispositivos, dale <b>Permitir</b>.</li></ol>`;
-    el.hint.textContent = "Versión web: la IA corre en tu PC con Ollama. Prueba el código en Studio antes de publicar.";
   }
   installBtn.addEventListener("click", async () => {
     if (instalandoUI) return;
@@ -82,7 +99,7 @@
     installLog.hidden = false;
     installLog.textContent = "";
     try {
-      const r = await fetch("/api/instalar", { method: "POST", headers: { "X-AguadoAI": "1" } });
+      const r = await fetch(API + "/api/instalar", { method: "POST", headers: { "X-AguadoAI": "1" } });
       if (!r.ok || !r.body) throw new Error(r.status === 409 ? "Ya se está instalando." : "No se pudo empezar la instalación.");
       const reader = r.body.getReader();
       const dec = new TextDecoder();
@@ -297,7 +314,7 @@
     card.classList.add("run");
     let r;
     try {
-      r = await (await fetch("/api/herramienta", { method: "POST", headers: { "Content-Type": "application/json", "X-AguadoAI": "1" }, body: JSON.stringify({ name: f.name, arguments: f.arguments || {} }) })).json();
+      r = await (await fetch(API + "/api/herramienta", { method: "POST", headers: { "Content-Type": "application/json", "X-AguadoAI": "1" }, body: JSON.stringify({ name: f.name, arguments: f.arguments || {} }) })).json();
     } catch { r = { ok: false, resultado: "Error: no se pudo hablar con el servidor." }; }
     card.classList.remove("run");
     card.classList.add(r.ok ? "ok" : "bad");
@@ -342,7 +359,7 @@
     let r;
     try {
       r = !DIRECTO
-        ? await fetch("/api/chat", {
+        ? await fetch(API + "/api/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json", "X-AguadoAI": "1" },
             signal: ctrl.signal,
